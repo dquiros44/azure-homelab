@@ -25,7 +25,7 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Build & push
+      - name: Build & push image
         id: build
         run: |
           TAG=${{ github.sha }}
@@ -47,6 +47,7 @@ jobs:
       - run: |
           kubectl apply -f k8s/ -n dev
           kubectl set image deployment/website website=${{ needs.build-and-push.outputs.image }} -n dev
+          kubectl rollout status deployment/website -n dev
 
   deploy-test:
     needs: deploy-dev
@@ -55,11 +56,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
-        with: { creds: ${{ secrets.AZURE_CREDENTIALS }} }
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
       - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
       - run: |
           kubectl apply -f k8s/ -n test
           kubectl set image deployment/website website=${{ needs.build-and-push.outputs.image }} -n test
+          kubectl rollout status deployment/website -n test
 
   deploy-prod:
     needs: deploy-test
@@ -68,8 +71,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
-        with: { creds: ${{ secrets.AZURE_CREDENTIALS }} }
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
       - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
       - run: |
           kubectl apply -f k8s/ -n prod
           kubectl set image deployment/website website=${{ needs.build-and-push.outputs.image }} -n prod
+          kubectl rollout status deployment/website -n prod

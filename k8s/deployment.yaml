@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: website
-        image: myhomelabacr.azurecr.io/homelab-website:latest   # will be overridden by pipeline
+        image: placeholder-do-not-use:latest   # ← this line will be overwritten every time
         ports:
         - containerPort: 80

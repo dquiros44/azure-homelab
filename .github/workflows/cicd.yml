@@ -1,4 +1,4 @@
-name: CI/CD → AKS (dev → test → prod)
+name: CI/CD → AKS (final working version)
 
 on:
   push:
@@ -11,77 +11,43 @@ env:
   CLUSTER: aks-homelab
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     outputs:
-      full-image: ${{ steps.build.outputs.full-image }}
+      image: ${{ steps.build.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-      - name: Log in to ACR
+      - name: Login to ACR
         uses: azure/docker-login@v1
         with:
           login-server: ${{ env.ACR_NAME }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Build & push image
+      - name: Build and push
         id: build
         run: |
-          TAG=${{ github.sha }}
-          FULL_IMAGE=${{ env.ACR_NAME }}/${{ env.IMAGE_NAME }}:$TAG
-          docker build -t $FULL_IMAGE .
-          docker push $FULL_IMAGE
-          echo "full-image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+          IMAGE=${{ env.ACR_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
 
-  deploy-dev:
-    needs: build-and-push
-    environment: dev
+  deploy:
+    needs: build
     runs-on: ubuntu-latest
+    environment: ${{ matrix.env }}
+    strategy:
+      matrix:
+        env: [dev, test, prod]
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
-      - name: Deploy to dev
+      - name: Deploy to ${{ matrix.env }}
         env:
-          IMAGE: ${{ needs.build-and-push.outputs.full-image }}
+          IMAGE: ${{ needs.build.outputs.image }}
         run: |
-          kubectl apply -f k8s/ -n dev
-          kubectl patch deployment website -n dev -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"website\",\"image\":\"$IMAGE\"}]}}}}"
-          kubectl rollout status deployment/website -n dev --timeout=300s
-
-  deploy-test:
-    needs: deploy-dev
-    environment: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
-      - name: Deploy to test
-        env:
-          IMAGE: ${{ needs.build-and-push.outputs.full-image }}
-        run: |
-          kubectl apply -f k8s/ -n test
-          kubectl patch deployment website -n test -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"website\",\"image\":\"$IMAGE\"}]}}}}"
-          kubectl rollout status deployment/website -n test --timeout=300s
-
-  deploy-prod:
-    needs: deploy-test
-    environment: prod
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
-      - name: Deploy to prod
-        env:
-          IMAGE: ${{ needs.build-and-push.outputs.full-image }}
-        run: |
-          kubectl apply -f k8s/ -n prod
-          kubectl patch deployment website -n prod -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"website\",\"image\":\"$IMAGE\"}]}}}}"
-          kubectl rollout status deployment/website -n prod --timeout=300s
+          kubectl apply -f k8s/ -n ${{ matrix.env }}
+          kubectl set image deployment/website website=$IMAGE -n ${{ matrix.env }} --record
+          kubectl rollout status deployment/website -n ${{ matrix.env }} --timeout=300s

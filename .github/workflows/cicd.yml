@@ -1,3 +1,37 @@
+name: CI/CD → AKS (dev → test → prod)
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  ACR_NAME: myhomelabacr.azurecr.io
+  IMAGE_NAME: homelab-website
+  RG: rg-homelab
+  CLUSTER: aks-homelab
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to ACR
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.ACR_NAME }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Build & push image
+        id: build
+        run: |
+          TAG=${{ github.sha }}
+          IMAGE=${{ env.ACR_NAME }}/${{ env.IMAGE_NAME }}:$TAG
+          docker build -t $IMAGE .
+          docker push $IMAGE
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
   deploy-dev:
     needs: build-and-push
     environment: dev
@@ -8,11 +42,8 @@
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
-
-      # Apply manifests + deploy in one safe step
       - run: |
           kubectl apply -f k8s/ -n dev
-          kubectl rollout restart deployment/website -n dev || true
           kubectl set image deployment/website website=${{ needs.build-and-push.outputs.image }} -n dev --record
           kubectl rollout status deployment/website -n dev --timeout=300s
 

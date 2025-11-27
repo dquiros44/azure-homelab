@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: website
-        image: placeholder-do-not-use:latest   # ← this line will be overwritten every time
+        image: myhomelabacr.azurecr.io/homelab-website:initial   # ← any valid image
         ports:
         - containerPort: 80

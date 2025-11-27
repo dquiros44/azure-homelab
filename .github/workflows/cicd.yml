@@ -1,4 +1,4 @@
-name: CI/CD → AKS (final working version)
+name: CI/CD → AKS (100% working)
 
 on:
   push:
@@ -14,17 +14,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.build.outputs.image }}
+      image: ${{ steps.set.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-      - name: Login to ACR
-        uses: azure/docker-login@v1
+      - uses: azure/docker-login@v1
         with:
           login-server: ${{ env.ACR_NAME }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Build and push
-        id: build
+      - id: set
         run: |
           IMAGE=${{ env.ACR_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           docker build -t $IMAGE .
@@ -34,20 +32,17 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: ${{ matrix.env }}
     strategy:
       matrix:
         env: [dev, test, prod]
+    environment: ${{ matrix.env }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - run: az aks get-credentials --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --overwrite-existing
-      - name: Deploy to ${{ matrix.env }}
-        env:
-          IMAGE: ${{ needs.build.outputs.image }}
-        run: |
+      - run: |
           kubectl apply -f k8s/ -n ${{ matrix.env }}
-          kubectl set image deployment/website website=$IMAGE -n ${{ matrix.env }} --record
-          kubectl rollout status deployment/website -n ${{ matrix.env }} --timeout=300s
+          kubectl set image deployment/website website=${{ needs.build.outputs.image }} -n ${{ matrix.env }} --record
+          kubectl rollout status deployment/website -n ${{ matrix.env }} --timeout=180s
